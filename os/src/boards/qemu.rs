@@ -1,91 +1,79 @@
-//! QEMU板级支持模块
-//!
-//! 该模块提供了QEMU模拟器特定的功能，主要是退出机制
-//! 参考：https://github.com/andre-richter/qemu-exit
-use core::arch::asm; // 使用内联汇编
+//ref:: https://github.com/andre-richter/qemu-exit
+use core::arch::asm;
 
-// 退出码常量
-const EXIT_SUCCESS: u32 = 0x5555; // 等同于`exit(0)`，QEMU成功退出
+const EXIT_SUCCESS: u32 = 0x5555; // Equals `exit(0)`. qemu successful exit
 
-const EXIT_FAILURE_FLAG: u32 = 0x3333; // 失败标志
-const EXIT_FAILURE: u32 = exit_code_encode(1); // 等同于`exit(1)`，QEMU失败退出
-const EXIT_RESET: u32 = 0x7777; // QEMU重置
+const EXIT_FAILURE_FLAG: u32 = 0x3333;
+const EXIT_FAILURE: u32 = exit_code_encode(1); // Equals `exit(1)`. qemu failed exit
+const EXIT_RESET: u32 = 0x7777; // qemu reset
 
-/// QEMU退出接口
-/// 定义了与退出相关的方法
 pub trait QEMUExit {
-    /// 使用指定的返回码退出
+    /// Exit with specified return code.
     ///
-    /// 注意：对于`X86`，代码在QEMU内部与`0x1`进行二进制OR操作。
+    /// Note: For `X86`, code is binary-OR'ed with `0x1` inside QEMU.
     fn exit(&self, code: u32) -> !;
 
-    /// 使用`EXIT_SUCCESS`（即`0`）退出QEMU（如果可能）。
+    /// Exit QEMU using `EXIT_SUCCESS`, aka `0`, if possible.
     ///
-    /// 注意：对于`X86`不可用。
+    /// Note: Not possible for `X86`.
     fn exit_success(&self) -> !;
 
-    /// 使用`EXIT_FAILURE`（即`1`）退出QEMU。
+    /// Exit QEMU using `EXIT_FAILURE`, aka `1`.
     fn exit_failure(&self) -> !;
 }
 
-/// RISCV64配置
-/// 定义了RISC-V 64位架构的QEMU退出处理结构
+/// RISCV64 configuration
 pub struct RISCV64 {
-    /// sifive_test映射设备的地址。
-    addr: u64, // 退出设备的内存映射地址
+    /// Address of the sifive_test mapped device.
+    addr: u64,
 }
 
-/// 使用EXIT_FAILURE_FLAG编码退出码。
-/// 将退出码左移16位并与EXIT_FAILURE_FLAG进行按位或操作
+/// Encode the exit code using EXIT_FAILURE_FLAG.
 const fn exit_code_encode(code: u32) -> u32 {
     (code << 16) | EXIT_FAILURE_FLAG
 }
 
 impl RISCV64 {
-    /// 创建一个RISCV64实例。
+    /// Create an instance.
     pub const fn new(addr: u64) -> Self {
-        RISCV64 { addr } // 初始化结构体
+        RISCV64 { addr }
     }
 }
 
-/// 为RISCV64实现QEMUExit trait
 impl QEMUExit for RISCV64 {
-    /// 使用指定的退出码退出QEMU。
+    /// Exit qemu with specified exit code.
     fn exit(&self, code: u32) -> ! {
-        // 如果代码不是特殊值，我们需要使用EXIT_FAILURE_FLAG进行编码。
+        // If code is not a special value, we need to encode it with EXIT_FAILURE_FLAG.
         let code_new = match code {
-            EXIT_SUCCESS | EXIT_FAILURE | EXIT_RESET => code, // 特殊值直接使用
-            _ => exit_code_encode(code), // 其他值需要编码
+            EXIT_SUCCESS | EXIT_FAILURE | EXIT_RESET => code,
+            _ => exit_code_encode(code),
         };
 
         unsafe {
             asm!(
-                "sw {0}, 0({1})", // 将退出码写入指定地址
-                in(reg)code_new, in(reg)self.addr // 将退出码和地址传入汇编指令
+                "sw {0}, 0({1})",
+                in(reg)code_new, in(reg)self.addr
             );
 
-            // 如果QEMU退出尝试不起作用，进入无限循环。
-            // 这里不能调用`panic!()`，因为这个函数很可能就是在`panic!()`处理程序中被调用的。
-            // 这样可以防止可能的无限循环。
+            // For the case that the QEMU exit attempt did not work, transition into an infinite
+            // loop. Calling `panic!()` here is unfeasible, since there is a good chance
+            // this function here is the last expression in the `panic!()` handler
+            // itself. This prevents a possible infinite loop.
             loop {
-                asm!("wfi", options(nomem, nostack)); // 等待中断指令，让CPU进入低功耗状态
+                asm!("wfi", options(nomem, nostack));
             }
         }
     }
 
-    /// 成功退出QEMU
     fn exit_success(&self) -> ! {
-        self.exit(EXIT_SUCCESS); // 调用exit函数并传入成功退出码
+        self.exit(EXIT_SUCCESS);
     }
 
-    /// 失败退出QEMU
     fn exit_failure(&self) -> ! {
-        self.exit(EXIT_FAILURE); // 调用exit函数并传入失败退出码
+        self.exit(EXIT_FAILURE);
     }
 }
 
-// QEMU虚拟机中测试设备的内存映射地址
 const VIRT_TEST: u64 = 0x100000;
 
-// 创建一个全局的QEMU退出处理器
 pub const QEMU_EXIT_HANDLE: RISCV64 = RISCV64::new(VIRT_TEST);

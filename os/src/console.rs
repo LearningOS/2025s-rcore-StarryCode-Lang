@@ -14,7 +14,7 @@ impl Write for Stdout {
 }
 
 pub fn print(args: fmt::Arguments) {
-    Stdout.write_fmt(args).unwrap();
+    Stdout.write_fmt(args).unwrap(); //core::fmt::Write trait 包含一个用来实现 println! 宏很好用的 write_fmt 方法
 }
 
 /// Print! to the host console using the format string and arguments.

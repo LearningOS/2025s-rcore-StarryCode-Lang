@@ -12,7 +12,7 @@
 //! details.)
 //!
 //! We then call [`batch::run_next_app()`] and for the first time go to
-//! userspace.
+//! userspace. 容器中尝试push
 
 #![deny(missing_docs)]
 #![deny(warnings)]
